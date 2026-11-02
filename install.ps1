@@ -3,11 +3,13 @@
 param(
     [string]$Domov = $env:USERPROFILE,
     [string]$Plocha = [Environment]::GetFolderPath('Desktop'),
+    [string]$Dokumenty = [Environment]::GetFolderPath('MyDocuments'),
     [switch]$BezInstalace,
     [switch]$BezSpusteni,
     [switch]$BezPath,
     [string]$KlicPath = 'Environment',
-    [string]$KlicTrid = 'Software\Classes'
+    [string]$KlicTrid = 'Software\Classes',
+    [string]$TestStrojovaPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,11 +17,20 @@ $ProgressPreference = 'SilentlyContinue'
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+# Na některých počítačích v PATH systémové složky chybí, proto se na ni nespoléháme.
+if (-not $env:SystemRoot) { $env:SystemRoot = [Environment]::GetFolderPath('Windows') }
+$Sys = $env:SystemRoot
+$env:Path = "$Sys\System32;$Sys;$Sys\System32\Wbem;$Sys\System32\WindowsPowerShell\v1.0;$env:Path"
+# Oficiální instalátor vyžaduje 64bitový PowerShell, i když nás spustila 32bitová aplikace.
+$PsExe = "$Sys\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+if (-not (Test-Path $PsExe)) { $PsExe = "$Sys\System32\WindowsPowerShell\v1.0\powershell.exe" }
+
 $OficialniInstalator = 'https://claude.ai/install.ps1'
 $DotClaude = Join-Path $Domov '.claude'
 $Bin = Join-Path $Domov '.local\bin'
 $ClaudeExe = Join-Path $Bin 'claude.exe'
-$Prace = Join-Path $Domov 'Claude'
+if (-not $Dokumenty) { $Dokumenty = Join-Path $Domov 'Documents' }
+$Prace = Join-Path $Dokumenty 'Claude'
 $Razitko = Get-Date -Format 'yyyyMMdd-HHmmss'
 
 $Zakazy = @(
@@ -36,6 +47,8 @@ Pracuješ s člověkem, který nezná programování ani příkazový řádek.
 - Nežádej ho o spouštění příkazů ani o úpravy souborů. Udělej to sám.
 - Když je zadání nejasné, polož jednu srozumitelnou otázku s návrhem řešení.
 - Nové soubory ukládej do aktuální pracovní složky, pokud neřekne jinak.
+- Když je aktuální složka C:\Windows, System32 nebo jiná systémová složka, nic v ní nevytvářej
+  ani neměň. Pracuj ve složce Dokumenty\Claude a řekni mu, kam se soubory ukládají.
 - Než smažeš nebo přepíšeš jeho soubory, zeptej se obyčejnými slovy. Totéž platí před
   odesláním čehokoli na internet, nákupem nebo změnou nastavení Windows.
 - Na závěr řekni, co vzniklo a kde to najde. Nevypisuj kód, pokud o něj nestojí.
@@ -56,29 +69,37 @@ function Nastav($objekt, $nazev, $hodnota) {
     $objekt | Add-Member -NotePropertyName $nazev -NotePropertyValue $hodnota -Force
 }
 
-function Najdi-Claude {
-    if (Test-Path $ClaudeExe) { return $ClaudeExe }
-    $prikaz = Get-Command claude -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($prikaz) { return $prikaz.Source }
-    return $null
+function Claude-Funguje {
+    if (-not (Test-Path $ClaudeExe)) { return $false }
+    try {
+        $null = & $ClaudeExe --version
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    }
 }
 
 function Nainstaluj-Claude {
-    if (Najdi-Claude) { Hotovo 'Claude Code už v počítači je, instalaci přeskakuji.'; return }
+    if (Claude-Funguje) { Hotovo 'Claude Code už v počítači je, instalaci přeskakuji.'; return }
     if ($BezInstalace) { throw 'Claude Code není nainstalovaný a instalace je vypnutá.' }
+    # Nefunkční soubor z dřívějška by mohl oficiální instalaci zmást.
+    if (Test-Path -LiteralPath $ClaudeExe) { Remove-Item -LiteralPath $ClaudeExe -Force }
     Write-Host '   Stahuji z oficiálního webu Anthropic, může to trvat pár minut...'
     $skript = Join-Path $env:TEMP "claude-oficialni-$Razitko.ps1"
     Invoke-WebRequest -UseBasicParsing -Uri $OficialniInstalator -OutFile $skript
     try {
-        $p = Start-Process powershell.exe -NoNewWindow -PassThru `
-            -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$skript`"")
+        # TLS 1.2 zapneme i pro oficiální instalátor. Kódovaný příkaz snese každý znak v cestě.
+        $prikaz = "[Net.ServicePointManager]::SecurityProtocol = 'Tls12'; & '$($skript -replace "'", "''")'; exit `$LASTEXITCODE"
+        $kodovany = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($prikaz))
+        $p = Start-Process $PsExe -NoNewWindow -PassThru `
+            -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $kodovany)
         $null = $p.Handle
         $p.WaitForExit()
         if ($p.ExitCode -ne 0) { throw "Oficiální instalace skončila chybou (kód $($p.ExitCode))." }
     } finally {
         Remove-Item $skript -Force -ErrorAction SilentlyContinue
     }
-    if (-not (Najdi-Claude)) { throw 'Instalace proběhla, ale Claude Code se nepodařilo najít.' }
+    if (-not (Claude-Funguje)) { throw 'Instalace proběhla, ale Claude Code nejde spustit. Může ho blokovat antivirus.' }
     Hotovo 'Claude Code je nainstalovaný.'
 }
 
@@ -87,10 +108,31 @@ function Pridej-DoPath {
     $klic = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($KlicPath)
     try {
         $puvodni = [string]$klic.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
-        $polozky = $puvodni -split ';' | Where-Object { $_ }
-        $rozbalene = $polozky | ForEach-Object { [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') }
-        if ($rozbalene -notcontains $Bin.TrimEnd('\')) {
-            $novy = (@($polozky) + $Bin) -join ';'
+        $polozky = @($puvodni -split ';' | Where-Object { $_ })
+        $rozbalene = @($polozky | ForEach-Object { [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') })
+        $pridat = @()
+        if ($rozbalene -notcontains $Bin.TrimEnd('\')) { $pridat += $Bin }
+
+        # Bez systémových složek v PATH nefungují běžné příkazy ani nástroje Claude.
+        # Systémová PATH vyžaduje správce, doplnění do uživatelské PATH ne.
+        $strojova = $TestStrojovaPath
+        if (-not $TestStrojovaPath) {
+            $stroj = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey('SYSTEM\CurrentControlSet\Control\Session Manager\Environment')
+            try {
+                $strojova = [string]$stroj.GetValue('Path', '')
+            } finally {
+                $stroj.Close()
+            }
+        }
+        $vsechny = @($rozbalene) + @($strojova -split ';' | Where-Object { $_ } | ForEach-Object {
+            [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\')
+        })
+        foreach ($slozka in '%SystemRoot%\System32', '%SystemRoot%', '%SystemRoot%\System32\Wbem', '%SystemRoot%\System32\WindowsPowerShell\v1.0') {
+            if ($vsechny -notcontains [Environment]::ExpandEnvironmentVariables($slozka)) { $pridat += $slozka }
+        }
+
+        if ($pridat.Count -gt 0) {
+            $novy = ($polozky + $pridat) -join ';'
             $klic.SetValue('Path', $novy, [Microsoft.Win32.RegistryValueKind]::ExpandString)
             # Tenhle zápis jen oznámí oknům Windows, že se proměnné změnily.
             [Environment]::SetEnvironmentVariable('CLAUDE_JEDEN_KLIK', $null, 'User')
@@ -152,12 +194,11 @@ function Priprav-Slozku {
     Nastav $konfigurace 'hasSeenAutoDefaultNudge' $true
     if (-not $konfigurace.theme) { Nastav $konfigurace 'theme' 'dark' }
     if (-not $konfigurace.projects) { Nastav $konfigurace 'projects' (New-Object PSObject) }
-    # Claude hledá důvěru i v nadřazených složkách. Zápis na kořeny pevných disků znamená,
-    # že se v žádné nové složce nezeptá. Jinak je předvybrané „No, exit“ a Enter ho vypne.
+    # Claude hledá důvěru i v nadřazených složkách. Zápis na kořeny disků znamená, že se
+    # v žádné nové složce nezeptá. Jinak je předvybrané „No, exit“ a Enter ho vypne.
+    # Všechna písmena, aby to platilo i pro flash disk nebo disk připojený později.
     $duveryhodne = @($Prace -replace '\\', '/')
-    foreach ($disk in [IO.DriveInfo]::GetDrives()) {
-        if ($disk.DriveType -eq 'Fixed') { $duveryhodne += ($disk.Name -replace '\\', '/') }
-    }
+    foreach ($pismeno in [char[]]'CDEFGHIJKLMNOPQRSTUVWXYZ') { $duveryhodne += "${pismeno}:/" }
     foreach ($klic in $duveryhodne) {
         $projekt = New-Object PSObject
         Nastav $projekt 'hasTrustDialogAccepted' $true
@@ -187,36 +228,28 @@ function Pridej-Nabidku {
     Hotovo 'Po kliknutí pravým tlačítkem na složku jde otevřít příkazový řádek.'
 }
 
-function Spust-A-Pockej($claude, [string[]]$argumenty) {
-    $p = Start-Process -FilePath $claude -ArgumentList $argumenty -NoNewWindow -PassThru
-    $null = $p.Handle
-    $p.WaitForExit()
-    return $p.ExitCode
-}
-
-function Prihlas($claude) {
-    $null = & $claude auth status
+function Prihlas {
+    $null = & $ClaudeExe auth status
     if ($LASTEXITCODE -eq 0) { Hotovo 'Už jsi přihlášený.'; return }
     Write-Host '   Otevře se prohlížeč. Přihlas se svým účtem Claude a pak se sem vrať.' -ForegroundColor Yellow
-    $kod = Spust-A-Pockej $claude @('auth', 'login', '--claudeai')
-    if ($kod -eq 0) {
+    Write-Host '   Když se přihlášení zasekne, zavři toto okno, spusť ikonu Claude na ploše a napiš /login' -ForegroundColor Yellow
+    $p = Start-Process -FilePath $ClaudeExe -ArgumentList @('auth', 'login', '--claudeai') -NoNewWindow -PassThru
+    $null = $p.Handle
+    $p.WaitForExit()
+    if ($p.ExitCode -eq 0) {
         Hotovo 'Přihlášení proběhlo.'
     } else {
         Write-Host '   Přihlášení se nedokončilo. V okně Claude napiš /login a zkus to znovu.' -ForegroundColor Yellow
     }
 }
 
-function Vytvor-Zastupce($claude) {
+function Vytvor-Zastupce {
+    New-Item -ItemType Directory -Force -Path $Plocha | Out-Null
     $lnk = Join-Path $Plocha 'Claude.lnk'
     $shell = New-Object -ComObject WScript.Shell
     $zastupce = $shell.CreateShortcut($lnk)
-    if ($claude -like '*.exe') {
-        $zastupce.TargetPath = $claude
-        $zastupce.IconLocation = "$claude,0"
-    } else {
-        $zastupce.TargetPath = "$env:SystemRoot\System32\cmd.exe"
-        $zastupce.Arguments = '/c claude'
-    }
+    $zastupce.TargetPath = $ClaudeExe
+    $zastupce.IconLocation = "$ClaudeExe,0"
     $zastupce.WorkingDirectory = $Prace
     $zastupce.Description = 'Spustit Claude'
     $zastupce.Save()
@@ -246,13 +279,17 @@ try {
     Hotovo "Tvoje práce se bude ukládat do složky $Prace"
 
     Krok '4/4  Přidávám ikonu a nabídku pravého tlačítka'
-    $claude = Najdi-Claude
-    Vytvor-Zastupce $claude
-    Pridej-Nabidku
+    # Ikona ani nabídka nejsou pro Claude nezbytné, jejich selhání instalaci nezastaví.
+    try { Vytvor-Zastupce } catch {
+        Write-Host '   Ikonu na plochu se nepodařilo vytvořit. Claude spustíš slovem claude v příkazovém řádku.' -ForegroundColor Yellow
+    }
+    try { Pridej-Nabidku } catch {
+        Write-Host '   Položku v nabídce pravého tlačítka se nepodařilo přidat.' -ForegroundColor Yellow
+    }
 
     if (-not $BezSpusteni) {
         Krok 'Přihlášení'
-        Prihlas $claude
+        Prihlas
     }
 
     Write-Host ''
@@ -264,11 +301,7 @@ try {
     Write-Host 'Teď se otevře okno Claude. Napiš do něj obyčejně česky, co potřebuješ.' -ForegroundColor Yellow
 
     if (-not $BezSpusteni) {
-        if ($claude -like '*.exe') {
-            Start-Process -FilePath $claude -WorkingDirectory $Prace
-        } else {
-            Start-Process -FilePath "$env:SystemRoot\System32\cmd.exe" -ArgumentList '/c claude' -WorkingDirectory $Prace
-        }
+        Start-Process -FilePath $ClaudeExe -WorkingDirectory $Prace
     }
     exit 0
 } catch {

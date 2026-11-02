@@ -15,6 +15,12 @@ Nainstaluje [Claude Code](https://code.claude.com/docs) do Windows a nastaví ho
 3. Když Windows napíše „Systém Windows ochránil váš počítač“, klikni na **Další informace** a pak na **Přesto spustit**.
 4. V prohlížeči se přihlas svým účtem Claude a vrať se do okna instalace.
 
+Když soubor nejde spustit (například ho zablokuje antivirus), otevři nabídku Start, napiš `PowerShell`, otevři ho a vlož tento řádek:
+
+```powershell
+irm https://raw.githubusercontent.com/Promptlab37/claude-na-jeden-klik/main/install.ps1 -OutFile "$env:TEMP\claude-instalace.ps1"; & "$PSHOME\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$env:TEMP\claude-instalace.ps1"
+```
+
 Pak už jen napiš obyčejně česky, co potřebuješ. Příště Claude spustíš ikonou **Claude** na ploše.
 
 ## Práce ve vlastní složce
@@ -30,7 +36,7 @@ Pak už jen napiš obyčejně česky, co potřebuješ. Příště Claude spustí
 - Dej mu přesné zadání a důležité soubory si zálohuj.
 - Nepoužívej ho na firemním počítači ani na počítači s citlivými daty, pokud to nemáš povolené.
 - Nenechávej ho zpracovávat weby a soubory, kterým nevěříš. Může se v nich schovávat škodlivý pokyn a tady ho nikdo nepotvrzuje. Oficiální dokumentace tento režim doporučuje jen pro izolované prostředí.
-- Nespouštěj ho ve složkách stažených z neznámých zdrojů. Dotaz na důvěru složky je vypnutý pro všechny pevné disky a nastavení v takové složce by se mohlo rovnou načíst a spustit.
+- Nespouštěj ho ve složkách stažených z neznámých zdrojů ani na cizím flash disku. Dotaz na důvěru složky je vypnutý pro všechny disky a nastavení v takové složce by se mohlo rovnou načíst a spustit.
 
 Chceš, aby se Claude ptal? V okně Claude stiskni `Shift+Tab`, nebo v souboru `.claude\settings.json` změň `defaultMode` na `auto`.
 
@@ -38,12 +44,12 @@ Chceš, aby se Claude ptal? V okně Claude stiskni `Shift+Tab`, nebo v souboru `
 
 | Krok | Co se změní |
 |---|---|
-| Instalace | Spustí [oficiální instalátor Anthropicu](https://claude.ai/install.ps1). Práva správce nepotřebuje. |
-| PATH | Přidá `%USERPROFILE%\.local\bin` do proměnné PATH uživatele. |
+| Instalace | Spustí [oficiální instalátor Anthropicu](https://claude.ai/install.ps1), pokud v `.local\bin` ještě funkční Claude není. Práva správce nepotřebuje. |
+| PATH | Přidá `%USERPROFILE%\.local\bin` do proměnné PATH uživatele. Když v počítači v PATH chybí systémové složky Windows, doplní je tam také. |
 | Nastavení | Do `.claude\settings.json` zapíše režim bez ptaní, češtinu a pár zákazů (například formátování disku). Zbytek nastavení nechá a udělá zálohu. |
 | Pokyny | Vytvoří `.claude\CLAUDE.md` s pokyny pro práci se začátečníkem, pokud tam ještě žádné nejsou. |
-| První spuštění | V `.claude.json` přeskočí úvodní volby a označí pracovní složku i kořeny pevných disků jako důvěryhodné. Pokud už jsi v Claude přihlášený, tento soubor nemění. |
-| Složka a ikona | Vytvoří složku `%USERPROFILE%\Claude` a ikonu na ploše. |
+| První spuštění | V `.claude.json` přeskočí úvodní volby a označí pracovní složku i kořeny všech disků jako důvěryhodné. Pokud už jsi v Claude přihlášený, tento soubor nemění. |
+| Složka a ikona | Vytvoří složku `Claude` v Dokumentech a ikonu na ploše. Claude se otevírá v této složce. |
 | Pravé tlačítko | Přidá do nabídky složek položku „Otevřít v příkazovém řádku“ (klíč `ClaudePrikazovyRadek` v `HKCU\Software\Classes`). |
 
 Zákazy jsou jen základní pojistka proti běžnému tvaru příkazu, nejsou to bezpečnostní hranice.
