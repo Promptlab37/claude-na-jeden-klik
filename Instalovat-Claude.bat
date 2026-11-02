@@ -25,7 +25,7 @@ if errorlevel 1 goto chyba
 if defined STAZENO del "%SKRIPT%" >nul 2>&1
 echo.
 echo Toto okno se za chvili samo zavre.
-timeout /t 15 >nul
+"%SystemRoot%\System32\timeout.exe" /t 15 >nul 2>&1
 exit /b 0
 
 :chyba
