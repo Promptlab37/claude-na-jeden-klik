@@ -79,6 +79,18 @@ function Claude-Funguje {
     }
 }
 
+function Jina-Instalace-Funguje {
+    # Oficiální instalátor odebere Claude nainstalovaný přes npm, to nesmíme nikomu udělat.
+    $prikaz = Get-Command claude -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $prikaz) { return $false }
+    try {
+        $null = & $prikaz.Source --version
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    }
+}
+
 function Nainstaluj-Claude {
     if (Claude-Funguje) { Hotovo 'Claude Code už v počítači je, instalaci přeskakuji.'; return }
     if ($BezInstalace) { throw 'Claude Code není nainstalovaný a instalace je vypnutá.' }
@@ -265,6 +277,13 @@ try {
     if (-not [Environment]::Is64BitOperatingSystem) { throw 'Claude Code vyžaduje 64bitová Windows.' }
     if ([Environment]::OSVersion.Version.Build -lt 17763) {
         throw 'Tahle verze Windows je moc stará. Claude Code potřebuje Windows 10 verze 1809 nebo novější.'
+    }
+
+    if ((-not (Claude-Funguje)) -and (Jina-Instalace-Funguje)) {
+        Write-Host ''
+        Write-Host 'Claude Code už v tomto počítači máš a funguje. Aby se nic nerozbilo, nic neměním.' -ForegroundColor Green
+        Write-Host 'Stačí v příkazovém řádku napsat: claude'
+        exit 0
     }
 
     Krok '1/4  Instaluji Claude Code'
