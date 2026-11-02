@@ -5,7 +5,9 @@ param(
     [string]$Plocha = [Environment]::GetFolderPath('Desktop'),
     [switch]$BezInstalace,
     [switch]$BezSpusteni,
-    [switch]$BezPath
+    [switch]$BezPath,
+    [string]$KlicPath = 'Environment',
+    [string]$KlicTrid = 'Software\Classes'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -82,7 +84,7 @@ function Nainstaluj-Claude {
 
 function Pridej-DoPath {
     if ($BezPath) { return }
-    $klic = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+    $klic = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($KlicPath)
     try {
         $puvodni = [string]$klic.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
         $polozky = $puvodni -split ';' | Where-Object { $_ }
@@ -150,11 +152,39 @@ function Priprav-Slozku {
     Nastav $konfigurace 'hasSeenAutoDefaultNudge' $true
     if (-not $konfigurace.theme) { Nastav $konfigurace 'theme' 'dark' }
     if (-not $konfigurace.projects) { Nastav $konfigurace 'projects' (New-Object PSObject) }
-    $klic = $Prace -replace '\\', '/'
-    $projekt = New-Object PSObject
-    Nastav $projekt 'hasTrustDialogAccepted' $true
-    Nastav $konfigurace.projects $klic $projekt
+    # Claude hledá důvěru i v nadřazených složkách. Zápis na kořeny pevných disků znamená,
+    # že se v žádné nové složce nezeptá. Jinak je předvybrané „No, exit“ a Enter ho vypne.
+    $duveryhodne = @($Prace -replace '\\', '/')
+    foreach ($disk in [IO.DriveInfo]::GetDrives()) {
+        if ($disk.DriveType -eq 'Fixed') { $duveryhodne += ($disk.Name -replace '\\', '/') }
+    }
+    foreach ($klic in $duveryhodne) {
+        $projekt = New-Object PSObject
+        Nastav $projekt 'hasTrustDialogAccepted' $true
+        Nastav $konfigurace.projects $klic $projekt
+    }
     Zapis-Text $cesta ($konfigurace | ConvertTo-Json -Depth 50)
+}
+
+function Pridej-Nabidku {
+    # Položka v nabídce pravého tlačítka na složce i uvnitř složky. Práva správce nepotřebuje.
+    # Windows 10 ji ukáže hned, Windows 11 pod „Zobrazit další možnosti“.
+    foreach ($typ in 'Directory', 'Directory\Background') {
+        $klic = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey("$KlicTrid\$typ\shell\ClaudePrikazovyRadek")
+        try {
+            $klic.SetValue('', 'Otevřít v příkazovém řádku')
+            $klic.SetValue('Icon', 'cmd.exe')
+            $prikaz = $klic.CreateSubKey('command')
+            try {
+                $prikaz.SetValue('', 'cmd.exe /s /k pushd "%V"')
+            } finally {
+                $prikaz.Close()
+            }
+        } finally {
+            $klic.Close()
+        }
+    }
+    Hotovo 'Po kliknutí pravým tlačítkem na složku jde otevřít příkazový řádek.'
 }
 
 function Spust-A-Pockej($claude, [string[]]$argumenty) {
@@ -200,6 +230,9 @@ try {
     Write-Host '==================================' -ForegroundColor Cyan
 
     if (-not [Environment]::Is64BitOperatingSystem) { throw 'Claude Code vyžaduje 64bitová Windows.' }
+    if ([Environment]::OSVersion.Version.Build -lt 17763) {
+        throw 'Tahle verze Windows je moc stará. Claude Code potřebuje Windows 10 verze 1809 nebo novější.'
+    }
 
     Krok '1/4  Instaluji Claude Code'
     Nainstaluj-Claude
@@ -212,9 +245,10 @@ try {
     Priprav-Slozku
     Hotovo "Tvoje práce se bude ukládat do složky $Prace"
 
-    Krok '4/4  Přidávám ikonu na plochu'
+    Krok '4/4  Přidávám ikonu a nabídku pravého tlačítka'
     $claude = Najdi-Claude
     Vytvor-Zastupce $claude
+    Pridej-Nabidku
 
     if (-not $BezSpusteni) {
         Krok 'Přihlášení'
@@ -225,6 +259,7 @@ try {
     Write-Host 'Hotovo!' -ForegroundColor Green
     Write-Host 'Claude teď pracuje bez ptaní: co mu napíšeš, to rovnou udělá.'
     Write-Host 'Příště ho spustíš ikonou Claude na ploše.'
+    Write-Host 'Nebo si založ složku, klikni na ni pravým tlačítkem, otevři příkazový řádek a napiš: claude'
     Write-Host ''
     Write-Host 'Teď se otevře okno Claude. Napiš do něj obyčejně česky, co potřebuješ.' -ForegroundColor Yellow
 

@@ -4,7 +4,7 @@ Nainstaluje [Claude Code](https://code.claude.com/docs) do Windows a nastaví ho
 
 ## Co potřebuješ
 
-- Windows 10 nebo 11 (64bitová verze)
+- Windows 10 verze 1809 nebo novější, případně Windows 11 (64bitová verze)
 - internet
 - placený účet Claude (Pro nebo vyšší), bezplatný účet Claude Code nezahrnuje
 
@@ -17,6 +17,12 @@ Nainstaluje [Claude Code](https://code.claude.com/docs) do Windows a nastaví ho
 
 Pak už jen napiš obyčejně česky, co potřebuješ. Příště Claude spustíš ikonou **Claude** na ploše.
 
+## Práce ve vlastní složce
+
+1. Založ si novou složku, kde chceš něco stavět.
+2. Klikni na ni pravým tlačítkem a zvol **Otevřít v příkazovém řádku**. Ve Windows 11 ji najdeš pod **Zobrazit další možnosti**, nebo rovnou zvol **Otevřít v terminálu**.
+3. Napiš `claude` a stiskni Enter.
+
 ## Dobré vědět
 
 **Claude se na nic neptá.** Je to tak nastavené záměrně (`bypassPermissions`), takže co mu napíšeš, to rovnou udělá, včetně práce se soubory a programy v počítači. Proto:
@@ -24,6 +30,7 @@ Pak už jen napiš obyčejně česky, co potřebuješ. Příště Claude spustí
 - Dej mu přesné zadání a důležité soubory si zálohuj.
 - Nepoužívej ho na firemním počítači ani na počítači s citlivými daty, pokud to nemáš povolené.
 - Nenechávej ho zpracovávat weby a soubory, kterým nevěříš. Může se v nich schovávat škodlivý pokyn a tady ho nikdo nepotvrzuje. Oficiální dokumentace tento režim doporučuje jen pro izolované prostředí.
+- Nespouštěj ho ve složkách stažených z neznámých zdrojů. Dotaz na důvěru složky je vypnutý pro všechny pevné disky a nastavení v takové složce by se mohlo rovnou načíst a spustit.
 
 Chceš, aby se Claude ptal? V okně Claude stiskni `Shift+Tab`, nebo v souboru `.claude\settings.json` změň `defaultMode` na `auto`.
 
@@ -35,14 +42,20 @@ Chceš, aby se Claude ptal? V okně Claude stiskni `Shift+Tab`, nebo v souboru `
 | PATH | Přidá `%USERPROFILE%\.local\bin` do proměnné PATH uživatele. |
 | Nastavení | Do `.claude\settings.json` zapíše režim bez ptaní, češtinu a pár zákazů (například formátování disku). Zbytek nastavení nechá a udělá zálohu. |
 | Pokyny | Vytvoří `.claude\CLAUDE.md` s pokyny pro práci se začátečníkem, pokud tam ještě žádné nejsou. |
-| První spuštění | V `.claude.json` přeskočí úvodní volby a označí pracovní složku jako důvěryhodnou. Pokud už jsi v Claude přihlášený, tento soubor nemění. |
+| První spuštění | V `.claude.json` přeskočí úvodní volby a označí pracovní složku i kořeny pevných disků jako důvěryhodné. Pokud už jsi v Claude přihlášený, tento soubor nemění. |
 | Složka a ikona | Vytvoří složku `%USERPROFILE%\Claude` a ikonu na ploše. |
+| Pravé tlačítko | Přidá do nabídky složek položku „Otevřít v příkazovém řádku“ (klíč `ClaudePrikazovyRadek` v `HKCU\Software\Classes`). |
 
 Zákazy jsou jen základní pojistka proti běžnému tvaru příkazu, nejsou to bezpečnostní hranice.
 
 ## Odinstalace
 
-Oficiální postup je v [dokumentaci](https://code.claude.com/docs/en/setup). Ikonu a složku `Claude` pak můžeš smazat ručně.
+Oficiální postup je v [dokumentaci](https://code.claude.com/docs/en/setup). Ikonu a složku `Claude` pak můžeš smazat ručně. Položku z nabídky pravého tlačítka odstraníš v příkazovém řádku:
+
+```
+reg delete "HKCU\Software\Classes\Directory\shell\ClaudePrikazovyRadek" /f
+reg delete "HKCU\Software\Classes\Directory\Background\shell\ClaudePrikazovyRadek" /f
+```
 
 ## Licence
 
