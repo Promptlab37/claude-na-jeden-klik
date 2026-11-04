@@ -240,19 +240,77 @@ function Pridej-Nabidku {
     Hotovo 'Po kliknutí pravým tlačítkem na složku jde otevřít příkazový řádek.'
 }
 
-function Prihlas {
-    $null = & $ClaudeExe auth status
-    if ($LASTEXITCODE -eq 0) { Hotovo 'Už jsi přihlášený.'; return }
-    Write-Host '   Otevře se prohlížeč. Přihlas se svým účtem Claude a pak se sem vrať.' -ForegroundColor Yellow
-    Write-Host '   Když se přihlášení zasekne, zavři toto okno, spusť ikonu Claude na ploše a napiš /login' -ForegroundColor Yellow
-    $p = Start-Process -FilePath $ClaudeExe -ArgumentList @('auth', 'login', '--claudeai') -NoNewWindow -PassThru
-    $null = $p.Handle
-    $p.WaitForExit()
-    if ($p.ExitCode -eq 0) {
-        Hotovo 'Přihlášení proběhlo.'
-    } else {
-        Write-Host '   Přihlášení se nedokončilo. V okně Claude napiš /login a zkus to znovu.' -ForegroundColor Yellow
+function Vypni-PlaceneKlice {
+    # API klíč má přednost před předplatným a účtuje se z kreditu („Credit balance too low“).
+    # Prázdná hodnota v nastavení ho vypne jen pro Claude. Jiným programům klíč zůstane
+    # a stačí to i na klíč nastavený pro celý počítač, kde by smazání chtělo správce.
+    $cesta = Join-Path $DotClaude 'settings.json'
+    $nastaveni = New-Object PSObject
+    if (Test-Path $cesta) {
+        try { $nastaveni = Precti-Json $cesta } catch { return }
     }
+    $zmena = $false
+    if ($nastaveni.PSObject.Properties['apiKeyHelper']) {
+        $nastaveni.PSObject.Properties.Remove('apiKeyHelper')
+        $zmena = $true
+    }
+    foreach ($nazev in 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN') {
+        $vPocitaci = [Environment]::GetEnvironmentVariable($nazev, 'Process') -or
+            [Environment]::GetEnvironmentVariable($nazev, 'User') -or
+            [Environment]::GetEnvironmentVariable($nazev, 'Machine')
+        $vNastaveni = $nastaveni.env -and $nastaveni.env.$nazev
+        if ($vPocitaci -or $vNastaveni) {
+            if (-not $nastaveni.env) { Nastav $nastaveni 'env' (New-Object PSObject) }
+            Nastav $nastaveni.env $nazev ''
+            $zmena = $true
+        }
+    }
+    if ($zmena) {
+        New-Item -ItemType Directory -Force -Path $DotClaude | Out-Null
+        if (Test-Path $cesta) { Copy-Item $cesta "$cesta.zaloha-klice-$Razitko" }
+        Zapis-Text $cesta ($nastaveni | ConvertTo-Json -Depth 50)
+        Hotovo 'Placený API klíč je pro Claude vypnutý, pojede přes předplatné.'
+    }
+}
+
+function Stav-Prihlaseni {
+    try {
+        return ((& $ClaudeExe auth status --json) -join "`n" | ConvertFrom-Json)
+    } catch {
+        return $null
+    }
+}
+
+function Prihlas {
+    # Vrací $false, když účet nemá předplatné a Claude by nefungoval.
+    $stav = Stav-Prihlaseni
+    if ($stav -and $stav.authMethod -eq 'claude.ai') {
+        Hotovo 'Už jsi přihlášený přes účet Claude.'
+    } else {
+        if ($stav -and $stav.loggedIn) {
+            Write-Host '   Claude je přihlášený přes placené API, ne přes předplatné. Přihlásíme ho znovu.' -ForegroundColor Yellow
+        }
+        Write-Host '   Otevře se prohlížeč. Přihlas se účtem, na kterém máš předplatné Claude, a pak se sem vrať.' -ForegroundColor Yellow
+        Write-Host '   Když se to zasekne, spusť Claude, napiš /login a vyber účet s předplatným.' -ForegroundColor Yellow
+        $p = Start-Process -FilePath $ClaudeExe -ArgumentList @('auth', 'login', '--claudeai') -NoNewWindow -PassThru
+        $null = $p.Handle
+        $p.WaitForExit()
+        $stav = Stav-Prihlaseni
+        if ($stav -and $stav.authMethod -eq 'claude.ai') {
+            Hotovo 'Přihlášení proběhlo.'
+        } else {
+            Write-Host '   Přihlášení se nedokončilo. Spusť Claude, napiš /login a vyber účet s předplatným.' -ForegroundColor Yellow
+            return $true
+        }
+    }
+    if ((-not $stav.subscriptionType) -or ($stav.subscriptionType -eq 'free')) {
+        Write-Host ''
+        Write-Host 'Na tomhle účtu není předplatné, které Claude Code potřebuje.' -ForegroundColor Red
+        Write-Host 'Kup si Pro nebo Max na https://claude.ai/upgrade a pak spusť Claude.' -ForegroundColor Red
+        Write-Host 'Když máš předplatné na jiném účtu, napiš v Claude /login a přihlas se tím účtem.' -ForegroundColor Red
+        return $false
+    }
+    return $true
 }
 
 function Vytvor-Zastupce {
@@ -281,8 +339,15 @@ try {
 
     if ((-not (Claude-Funguje)) -and (Jina-Instalace-Funguje)) {
         Write-Host ''
-        Write-Host 'Claude Code už v tomto počítači máš a funguje. Aby se nic nerozbilo, nic neměním.' -ForegroundColor Green
+        Write-Host 'Claude Code už v tomto počítači máš a funguje. Aby se nic nerozbilo, instalaci přeskakuji.' -ForegroundColor Green
         Write-Host 'Stačí v příkazovém řádku napsat: claude'
+        if (-not $BezSpusteni) {
+            # Kvůli placenému API se ale kontroluje i tahle instalace.
+            # Start-Process neumí spustit claude.ps1, proto jen .cmd nebo .exe.
+            $ClaudeExe = (Get-Command claude -CommandType Application | Select-Object -First 1).Source
+            Vypni-PlaceneKlice
+            if (-not (Prihlas)) { exit 1 }
+        }
         exit 0
     }
 
@@ -292,6 +357,7 @@ try {
 
     Krok '2/4  Nastavuji Claude'
     Nastav-Claude
+    Vypni-PlaceneKlice
 
     Krok '3/4  Připravuji pracovní složku'
     Priprav-Slozku
@@ -308,7 +374,7 @@ try {
 
     if (-not $BezSpusteni) {
         Krok 'Přihlášení'
-        Prihlas
+        if (-not (Prihlas)) { exit 1 }
     }
 
     Write-Host ''

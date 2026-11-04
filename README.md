@@ -51,6 +51,7 @@ Chceš, aby se Claude ptal? V okně Claude stiskni `Shift+Tab`, nebo v souboru `
 | První spuštění | V `.claude.json` přeskočí úvodní volby a označí pracovní složku i kořeny všech disků jako důvěryhodné. Pokud už jsi v Claude přihlášený, tento soubor nemění. |
 | Složka a ikona | Vytvoří složku `Claude` v Dokumentech a ikonu na ploše. Claude se otevírá v této složce. |
 | Pravé tlačítko | Přidá do nabídky složek položku „Otevřít v příkazovém řádku“ (klíč `ClaudePrikazovyRadek` v `HKCU\Software\Classes`). |
+| Přihlášení | Otevře přihlášení přes předplatné Claude. API klíč vypne jen pro Claude (prázdná hodnota v `settings.json`), jiným programům zůstane. Přihlášení přes placené API nahradí předplatným. Účet bez předplatného instalátor ohlásí. |
 
 Zákazy jsou jen základní pojistka proti běžnému tvaru příkazu, nejsou to bezpečnostní hranice.
 
