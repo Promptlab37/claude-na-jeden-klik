@@ -1,19 +1,22 @@
 # Claude na jeden klik
 
-Nainstaluje [Claude Code](https://code.claude.com/docs) do Windows a nastaví ho tak, aby s ním mohl pracovat i člověk, který příkazovému řádku vůbec nerozumí.
+Jedním kliknutím nainstaluje do Windows [Claude Code](https://code.claude.com/docs) a [Codex](https://developers.openai.com/codex/cli). Claude nastaví tak, aby s ním mohl pracovat i člověk, který příkazovému řádku vůbec nerozumí.
 
 ## Co potřebuješ
 
 - Windows 10 verze 1809 nebo novější, případně Windows 11 (64bitová verze)
 - internet
-- placený účet Claude (Pro nebo vyšší), bezplatný účet Claude Code nezahrnuje
+- účet Claude pro Claude Code (předplatné Pro nebo vyšší, případně API klíč), bezplatný účet Claude Code nezahrnuje
+- účet ChatGPT pro Codex
 
 ## Instalace
 
 1. **[Stáhni soubor Instalovat-Claude.bat](https://github.com/Promptlab37/claude-na-jeden-klik/releases/latest/download/Instalovat-Claude.bat)**
 2. Dvakrát na něj klikni.
 3. Když Windows napíše „Systém Windows ochránil váš počítač“, klikni na **Další informace** a pak na **Přesto spustit**.
-4. V prohlížeči se přihlas svým účtem Claude a vrať se do okna instalace.
+4. Na konci se otevře Claude. Při prvním spuštění se zeptá na přihlášení, přihlas se svým účtem.
+
+Codex spustíš v příkazovém řádku slovem `codex`. Na přihlášení se zeptá také sám.
 
 Když soubor nejde spustit (například ho zablokuje antivirus), otevři nabídku Start, napiš `PowerShell`, otevři ho a vlož tento řádek:
 
@@ -27,7 +30,7 @@ Pak už jen napiš obyčejně česky, co potřebuješ. Příště Claude spustí
 
 1. Založ si novou složku, kde chceš něco stavět.
 2. Klikni na ni pravým tlačítkem a zvol **Otevřít v příkazovém řádku**. Ve Windows 11 ji najdeš pod **Zobrazit další možnosti**, nebo rovnou zvol **Otevřít v terminálu**.
-3. Napiš `claude` a stiskni Enter.
+3. Napiš `claude` nebo `codex` a stiskni Enter.
 
 ## Dobré vědět
 
@@ -45,13 +48,14 @@ Chceš, aby se Claude ptal? V okně Claude stiskni `Shift+Tab`, nebo v souboru `
 | Krok | Co se změní |
 |---|---|
 | Instalace | Spustí [oficiální instalátor Anthropicu](https://claude.ai/install.ps1), pokud v `.local\bin` ještě funkční Claude není. Práva správce nepotřebuje. |
+| Codex | Spustí [oficiální instalátor OpenAI](https://chatgpt.com/codex/install.ps1), pokud Codex v počítači ještě není. Jeho nastavení nemění. Když se instalace Codexu nepovede, Claude se nainstaluje i tak. |
 | PATH | Přidá `%USERPROFILE%\.local\bin` do proměnné PATH uživatele. Když v počítači v PATH chybí systémové složky Windows, doplní je tam také. |
 | Nastavení | Do `.claude\settings.json` zapíše režim bez ptaní, češtinu a pár zákazů (například formátování disku). Zbytek nastavení nechá a udělá zálohu. |
 | Pokyny | Vytvoří `.claude\CLAUDE.md` s pokyny pro práci se začátečníkem, pokud tam ještě žádné nejsou. |
-| První spuštění | V `.claude.json` přeskočí úvodní volby a označí pracovní složku i kořeny všech disků jako důvěryhodné. Pokud už jsi v Claude přihlášený, tento soubor nemění. |
+| První spuštění | V `.claude.json` označí pracovní složku i kořeny všech disků jako důvěryhodné. Pokud už jsi v Claude přihlášený, tento soubor nemění. |
 | Složka a ikona | Vytvoří složku `Claude` v Dokumentech a ikonu na ploše. Claude se otevírá v této složce. |
 | Pravé tlačítko | Přidá do nabídky složek položku „Otevřít v příkazovém řádku“ (klíč `ClaudePrikazovyRadek` v `HKCU\Software\Classes`). |
-| Přihlášení | Otevře přihlášení přes předplatné Claude. API klíč vypne jen pro Claude (prázdná hodnota v `settings.json`), jiným programům zůstane. Přihlášení přes placené API nahradí předplatným. Účet bez předplatného instalátor ohlásí. |
+| Přihlášení | Instalátor nikoho nepřihlašuje a na API klíče nesahá. Claude i Codex se při prvním spuštění zeptají samy a každý si vybere, jak se přihlásí. |
 
 Zákazy jsou jen základní pojistka proti běžnému tvaru příkazu, nejsou to bezpečnostní hranice.
 

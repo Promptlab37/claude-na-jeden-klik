@@ -1,4 +1,4 @@
-﻿# Claude na jeden klik: nainstaluje Claude Code a nastaví ho pro začátečníka.
+﻿# Claude na jeden klik: nainstaluje Claude Code a Codex a nastaví Claude pro začátečníka.
 # Spouští se přes Instalovat-Claude.bat. Práva správce nepotřebuje.
 param(
     [string]$Domov = $env:USERPROFILE,
@@ -26,6 +26,7 @@ $PsExe = "$Sys\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
 if (-not (Test-Path $PsExe)) { $PsExe = "$Sys\System32\WindowsPowerShell\v1.0\powershell.exe" }
 
 $OficialniInstalator = 'https://claude.ai/install.ps1'
+$InstalatorCodexu = 'https://chatgpt.com/codex/install.ps1'
 $DotClaude = Join-Path $Domov '.claude'
 $Bin = Join-Path $Domov '.local\bin'
 $ClaudeExe = Join-Path $Bin 'claude.exe'
@@ -115,6 +116,52 @@ function Nainstaluj-Claude {
     Hotovo 'Claude Code je nainstalovaný.'
 }
 
+function Codex-Funguje {
+    $kandidati = @()
+    if ($env:LOCALAPPDATA) { $kandidati += Join-Path $env:LOCALAPPDATA 'Programs\OpenAI\Codex\bin\codex.exe' }
+    $prikaz = Get-Command codex -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($prikaz) { $kandidati += $prikaz.Source }
+    foreach ($soubor in $kandidati) {
+        if (-not (Test-Path -LiteralPath $soubor)) { continue }
+        try {
+            $null = & $soubor --version
+            if ($LASTEXITCODE -eq 0) { return $true }
+        } catch {}
+    }
+    return $false
+}
+
+function Nainstaluj-Codex {
+    # Codex je doplněk. Když se nepovede, instalace Claude pokračuje dál.
+    # Vrací $true, když Codex v počítači je.
+    try {
+        if (Codex-Funguje) { Hotovo 'Codex už v počítači je, instalaci přeskakuji.'; return $true }
+        if ($BezInstalace) { return $false }
+        Write-Host '   Stahuji z oficiálního webu OpenAI, může to trvat pár minut...'
+        $skript = Join-Path $env:TEMP "codex-oficialni-$Razitko.ps1"
+        Invoke-WebRequest -UseBasicParsing -Uri $InstalatorCodexu -OutFile $skript
+        try {
+            # Bez tohoto se oficiální instalátor anglicky ptá a na konci by Codex sám spustil.
+            $env:CODEX_NON_INTERACTIVE = '1'
+            $prikaz = "[Net.ServicePointManager]::SecurityProtocol = 'Tls12'; & '$($skript -replace "'", "''")'; exit `$LASTEXITCODE"
+            $kodovany = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($prikaz))
+            $p = Start-Process $PsExe -NoNewWindow -PassThru `
+                -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $kodovany)
+            $null = $p.Handle
+            $p.WaitForExit()
+            if ($p.ExitCode -ne 0) { throw "kód $($p.ExitCode)" }
+        } finally {
+            Remove-Item $skript -Force -ErrorAction SilentlyContinue
+        }
+        if (-not (Codex-Funguje)) { throw 'Codex nejde spustit' }
+        Hotovo 'Codex je nainstalovaný.'
+        return $true
+    } catch {
+        Write-Host "   Codex se nepodařilo nainstalovat ($($_.Exception.Message)). Claude to neovlivní." -ForegroundColor Yellow
+        return $false
+    }
+}
+
 function Pridej-DoPath {
     if ($BezPath) { return }
     $klic = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($KlicPath)
@@ -200,8 +247,6 @@ function Priprav-Slozku {
         if ($konfigurace.oauthAccount) { return }
         Copy-Item $cesta "$cesta.zaloha-$Razitko"
     }
-    # Přeskočí anglickou volbu barev při prvním spuštění, přihlášení zůstává.
-    Nastav $konfigurace 'hasCompletedOnboarding' $true
     # Bez toho se Claude po startu anglicky ptá, jestli přepnout režim, a předvybrané je Ano.
     Nastav $konfigurace 'hasSeenAutoDefaultNudge' $true
     if (-not $konfigurace.theme) { Nastav $konfigurace 'theme' 'dark' }
@@ -240,79 +285,6 @@ function Pridej-Nabidku {
     Hotovo 'Po kliknutí pravým tlačítkem na složku jde otevřít příkazový řádek.'
 }
 
-function Vypni-PlaceneKlice {
-    # API klíč má přednost před předplatným a účtuje se z kreditu („Credit balance too low“).
-    # Prázdná hodnota v nastavení ho vypne jen pro Claude. Jiným programům klíč zůstane
-    # a stačí to i na klíč nastavený pro celý počítač, kde by smazání chtělo správce.
-    $cesta = Join-Path $DotClaude 'settings.json'
-    $nastaveni = New-Object PSObject
-    if (Test-Path $cesta) {
-        try { $nastaveni = Precti-Json $cesta } catch { return }
-    }
-    $zmena = $false
-    if ($nastaveni.PSObject.Properties['apiKeyHelper']) {
-        $nastaveni.PSObject.Properties.Remove('apiKeyHelper')
-        $zmena = $true
-    }
-    foreach ($nazev in 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN') {
-        $vPocitaci = [Environment]::GetEnvironmentVariable($nazev, 'Process') -or
-            [Environment]::GetEnvironmentVariable($nazev, 'User') -or
-            [Environment]::GetEnvironmentVariable($nazev, 'Machine')
-        $vNastaveni = $nastaveni.env -and $nastaveni.env.$nazev
-        if ($vPocitaci -or $vNastaveni) {
-            if (-not $nastaveni.env) { Nastav $nastaveni 'env' (New-Object PSObject) }
-            Nastav $nastaveni.env $nazev ''
-            $zmena = $true
-        }
-    }
-    if ($zmena) {
-        New-Item -ItemType Directory -Force -Path $DotClaude | Out-Null
-        if (Test-Path $cesta) { Copy-Item $cesta "$cesta.zaloha-klice-$Razitko" }
-        Zapis-Text $cesta ($nastaveni | ConvertTo-Json -Depth 50)
-        Hotovo 'Placený API klíč je pro Claude vypnutý, pojede přes předplatné.'
-    }
-}
-
-function Stav-Prihlaseni {
-    try {
-        return ((& $ClaudeExe auth status --json) -join "`n" | ConvertFrom-Json)
-    } catch {
-        return $null
-    }
-}
-
-function Prihlas {
-    # Vrací $false, když účet nemá předplatné a Claude by nefungoval.
-    $stav = Stav-Prihlaseni
-    if ($stav -and $stav.authMethod -eq 'claude.ai') {
-        Hotovo 'Už jsi přihlášený přes účet Claude.'
-    } else {
-        if ($stav -and $stav.loggedIn) {
-            Write-Host '   Claude je přihlášený přes placené API, ne přes předplatné. Přihlásíme ho znovu.' -ForegroundColor Yellow
-        }
-        Write-Host '   Otevře se prohlížeč. Přihlas se účtem, na kterém máš předplatné Claude, a pak se sem vrať.' -ForegroundColor Yellow
-        Write-Host '   Když se to zasekne, spusť Claude, napiš /login a vyber účet s předplatným.' -ForegroundColor Yellow
-        $p = Start-Process -FilePath $ClaudeExe -ArgumentList @('auth', 'login', '--claudeai') -NoNewWindow -PassThru
-        $null = $p.Handle
-        $p.WaitForExit()
-        $stav = Stav-Prihlaseni
-        if ($stav -and $stav.authMethod -eq 'claude.ai') {
-            Hotovo 'Přihlášení proběhlo.'
-        } else {
-            Write-Host '   Přihlášení se nedokončilo. Spusť Claude, napiš /login a vyber účet s předplatným.' -ForegroundColor Yellow
-            return $true
-        }
-    }
-    if ((-not $stav.subscriptionType) -or ($stav.subscriptionType -eq 'free')) {
-        Write-Host ''
-        Write-Host 'Na tomhle účtu není předplatné, které Claude Code potřebuje.' -ForegroundColor Red
-        Write-Host 'Kup si Pro nebo Max na https://claude.ai/upgrade a pak spusť Claude.' -ForegroundColor Red
-        Write-Host 'Když máš předplatné na jiném účtu, napiš v Claude /login a přihlas se tím účtem.' -ForegroundColor Red
-        return $false
-    }
-    return $true
-}
-
 function Vytvor-Zastupce {
     New-Item -ItemType Directory -Force -Path $Plocha | Out-Null
     $lnk = Join-Path $Plocha 'Claude.lnk'
@@ -329,7 +301,7 @@ function Vytvor-Zastupce {
 try {
     Write-Host ''
     Write-Host '==================================' -ForegroundColor Cyan
-    Write-Host '   Claude: instalace na jeden klik' -ForegroundColor Cyan
+    Write-Host '   Claude a Codex na jeden klik' -ForegroundColor Cyan
     Write-Host '==================================' -ForegroundColor Cyan
 
     if (-not [Environment]::Is64BitOperatingSystem) { throw 'Claude Code vyžaduje 64bitová Windows.' }
@@ -341,29 +313,26 @@ try {
         Write-Host ''
         Write-Host 'Claude Code už v tomto počítači máš a funguje. Aby se nic nerozbilo, instalaci přeskakuji.' -ForegroundColor Green
         Write-Host 'Stačí v příkazovém řádku napsat: claude'
-        if (-not $BezSpusteni) {
-            # Kvůli placenému API se ale kontroluje i tahle instalace.
-            # Start-Process neumí spustit claude.ps1, proto jen .cmd nebo .exe.
-            $ClaudeExe = (Get-Command claude -CommandType Application | Select-Object -First 1).Source
-            Vypni-PlaceneKlice
-            if (-not (Prihlas)) { exit 1 }
-        }
+        Krok 'Instaluji Codex'
+        if (Nainstaluj-Codex) { Write-Host '   Codex spustíš v novém příkazovém řádku slovem: codex' }
         exit 0
     }
 
-    Krok '1/4  Instaluji Claude Code'
+    Krok '1/5  Instaluji Claude Code'
     Nainstaluj-Claude
+
+    Krok '2/5  Instaluji Codex'
+    $JeCodex = Nainstaluj-Codex
     Pridej-DoPath
 
-    Krok '2/4  Nastavuji Claude'
+    Krok '3/5  Nastavuji Claude'
     Nastav-Claude
-    Vypni-PlaceneKlice
 
-    Krok '3/4  Připravuji pracovní složku'
+    Krok '4/5  Připravuji pracovní složku'
     Priprav-Slozku
     Hotovo "Tvoje práce se bude ukládat do složky $Prace"
 
-    Krok '4/4  Přidávám ikonu a nabídku pravého tlačítka'
+    Krok '5/5  Přidávám ikonu a nabídku pravého tlačítka'
     # Ikona ani nabídka nejsou pro Claude nezbytné, jejich selhání instalaci nezastaví.
     try { Vytvor-Zastupce } catch {
         Write-Host '   Ikonu na plochu se nepodařilo vytvořit. Claude spustíš slovem claude v příkazovém řádku.' -ForegroundColor Yellow
@@ -372,18 +341,18 @@ try {
         Write-Host '   Položku v nabídce pravého tlačítka se nepodařilo přidat.' -ForegroundColor Yellow
     }
 
-    if (-not $BezSpusteni) {
-        Krok 'Přihlášení'
-        if (-not (Prihlas)) { exit 1 }
-    }
-
     Write-Host ''
     Write-Host 'Hotovo!' -ForegroundColor Green
     Write-Host 'Claude teď pracuje bez ptaní: co mu napíšeš, to rovnou udělá.'
     Write-Host 'Příště ho spustíš ikonou Claude na ploše.'
     Write-Host 'Nebo si založ složku, klikni na ni pravým tlačítkem, otevři příkazový řádek a napiš: claude'
+    if ($JeCodex) {
+        Write-Host 'Codex spustíš stejně, jen napíšeš: codex'
+    }
     Write-Host ''
-    Write-Host 'Teď se otevře okno Claude. Napiš do něj obyčejně česky, co potřebuješ.' -ForegroundColor Yellow
+    Write-Host 'Při prvním spuštění se Claude i Codex zeptají na přihlášení. Přihlas se svým účtem.'
+    Write-Host ''
+    Write-Host 'Teď se otevře okno Claude. Přihlas se a pak piš obyčejně česky, co potřebuješ.' -ForegroundColor Yellow
 
     if (-not $BezSpusteni) {
         Start-Process -FilePath $ClaudeExe -WorkingDirectory $Prace
