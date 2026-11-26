@@ -1,11 +1,12 @@
 @echo off
-title Instalace Claude
+title Claude + Codex na jeden klik
 setlocal
 
 rem Nespolehame na PATH: na nekterych pocitacich v ni systemove slozky chybi.
 if not defined SystemRoot set "SystemRoot=C:\Windows"
 set "PATH=%SystemRoot%\System32;%SystemRoot%;%SystemRoot%\System32\Wbem;%SystemRoot%\System32\WindowsPowerShell\v1.0;%PATH%"
 if not defined TEMP set "TEMP=%USERPROFILE%"
+if not exist "%TEMP%\" set "TEMP=%USERPROFILE%"
 
 rem Pri spusteni z 32bitove aplikace by System32 vedla na 32bitovy PowerShell.
 set "PS=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"

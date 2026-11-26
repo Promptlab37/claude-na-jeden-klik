@@ -1,4 +1,4 @@
-﻿# Claude na jeden klik: nainstaluje Claude Code a Codex a nastaví Claude pro začátečníka.
+﻿# Claude + Codex na jeden klik: nainstaluje Claude Code a Codex a nastaví je pro začátečníka.
 # Spouští se přes Instalovat-Claude.bat. Práva správce nepotřebuje.
 param(
     [string]$Domov = $env:USERPROFILE,
@@ -9,7 +9,8 @@ param(
     [switch]$BezPath,
     [string]$KlicPath = 'Environment',
     [string]$KlicTrid = 'Software\Classes',
-    [string]$TestStrojovaPath
+    [string]$TestStrojovaPath,
+    [int]$MinMistoMB = 1000
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,6 +25,9 @@ $env:Path = "$Sys\System32;$Sys;$Sys\System32\Wbem;$Sys\System32\WindowsPowerShe
 # Oficiální instalátor vyžaduje 64bitový PowerShell, i když nás spustila 32bitová aplikace.
 $PsExe = "$Sys\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
 if (-not (Test-Path $PsExe)) { $PsExe = "$Sys\System32\WindowsPowerShell\v1.0\powershell.exe" }
+
+# Spouštěné nástroje si občas odloží pomocné soubory do aktuální složky. Ať to není Plocha nebo Stažené.
+if ($env:TEMP -and (Test-Path $env:TEMP)) { Set-Location $env:TEMP; [Environment]::CurrentDirectory = $env:TEMP }
 
 $OficialniInstalator = 'https://claude.ai/install.ps1'
 $InstalatorCodexu = 'https://chatgpt.com/codex/install.ps1'
@@ -55,11 +59,127 @@ Pracuješ s člověkem, který nezná programování ani příkazový řádek.
 - Na závěr řekni, co vzniklo a kde to najde. Nevypisuj kód, pokud o něj nestojí.
 '@
 
-function Krok($text) { Write-Host ''; Write-Host $text -ForegroundColor Cyan }
-function Hotovo($text) { Write-Host "   OK: $text" -ForegroundColor Green }
+$KrokuCelkem = 5
+$Sirka = 58
+
+function Krok($cislo, $text) {
+    Write-Host ''
+    Write-Host '   ' -NoNewline
+    Write-Host ('█' * $cislo) -ForegroundColor Cyan -NoNewline
+    Write-Host ('░' * ($KrokuCelkem - $cislo)) -ForegroundColor DarkGray -NoNewline
+    Write-Host "  $cislo/$KrokuCelkem  " -ForegroundColor DarkGray -NoNewline
+    Write-Host $text -ForegroundColor White
+}
+
+function Hotovo($text) {
+    Write-Host '     √ ' -ForegroundColor Green -NoNewline
+    Write-Host $text
+}
+
+function Pozor($text) {
+    Write-Host '     ! ' -ForegroundColor Yellow -NoNewline
+    Write-Host $text -ForegroundColor Yellow
+}
+
+function Radek($text) { Write-Host "     $text" }
+
+function Ramecek($barva, $radky) {
+    Write-Host ''
+    Write-Host ('   ╔' + ('═' * $Sirka) + '╗') -ForegroundColor $barva
+    foreach ($r in $radky) {
+        Write-Host ('   ║   ' + ([string]$r).PadRight($Sirka - 3) + '║') -ForegroundColor $barva
+    }
+    Write-Host ('   ╚' + ('═' * $Sirka) + '╝') -ForegroundColor $barva
+}
+
+function Uvod {
+    try { $Host.UI.RawUI.WindowTitle = 'Claude + Codex na jeden klik' } catch {}
+    $okraj = 'DarkGray'
+    Write-Host ''
+    Write-Host ('   ╔' + ('═' * $Sirka) + '╗') -ForegroundColor $okraj
+    Write-Host ('   ║' + (' ' * $Sirka) + '║') -ForegroundColor $okraj
+    Write-Host '   ║   ' -ForegroundColor $okraj -NoNewline
+    Write-Host 'CLAUDE' -ForegroundColor DarkYellow -NoNewline
+    Write-Host ' + ' -ForegroundColor Gray -NoNewline
+    Write-Host 'CODEX' -ForegroundColor Cyan -NoNewline
+    Write-Host ((' ' * ($Sirka - 17)) + '║') -ForegroundColor $okraj
+    Write-Host '   ║   ' -ForegroundColor $okraj -NoNewline
+    Write-Host 'instalace na jeden klik' -ForegroundColor White -NoNewline
+    Write-Host ((' ' * ($Sirka - 26)) + '║') -ForegroundColor $okraj
+    Write-Host ('   ║' + (' ' * $Sirka) + '║') -ForegroundColor $okraj
+    Write-Host ('   ╚' + ('═' * $Sirka) + '╝') -ForegroundColor $okraj
+    Write-Host ''
+    Radek 'Trvá to pár minut. Nic nemusíš mačkat, jen počkej na konec.'
+    Radek 'Kdyby se okno zastavilo, klikni do něj a stiskni Enter.'
+}
+
+function Cekej($proces, $popis) {
+    # Ukazatel, že se něco děje. Při přesměrovaném výstupu se jen čeká.
+    $naObrazovku = $true
+    try { $naObrazovku = -not [Console]::IsOutputRedirected } catch {}
+    if (-not $naObrazovku) {
+        Radek "$popis..."
+        $proces.WaitForExit()
+        return
+    }
+    $znaky = '|', '/', '-', '\'
+    $zacatek = Get-Date
+    $i = 0
+    while (-not $proces.WaitForExit(150)) {
+        $sekundy = [int]((Get-Date) - $zacatek).TotalSeconds
+        Write-Host ("`r     {0} {1} ({2} s)   " -f $znaky[$i % 4], $popis, $sekundy) -ForegroundColor DarkCyan -NoNewline
+        $i++
+    }
+    $proces.WaitForExit()
+    Write-Host ("`r" + (' ' * 78) + "`r") -NoNewline
+}
+
+function Spust-Oficialni($adresa, $nazev, $popis) {
+    # Stáhne a spustí oficiální instalátor. Jeho anglický výstup jde do souboru,
+    # na obrazovce běží jen ukazatel. Při chybě se konec výstupu ukáže.
+    $skript = Join-Path $env:TEMP "$nazev-oficialni-$Razitko-$PID.ps1"
+    $obal = Join-Path $env:TEMP "$nazev-spusteni-$Razitko-$PID.ps1"
+    $vystup = Join-Path $env:TEMP "$nazev-instalace-$Razitko-$PID.log"
+    $chyby = Join-Path $env:TEMP "$nazev-instalace-$Razitko-$PID.chyby.log"
+    # Plný disk končí nesrozumitelnou anglickou chybou uprostřed instalace.
+    $disk = New-Object IO.DriveInfo ([IO.Path]::GetPathRoot($Domov))
+    $volneMB = [int]($disk.AvailableFreeSpace / 1MB)
+    if ($volneMB -lt $MinMistoMB) {
+        throw "Na disku $($disk.Name) je jen $volneMB MB volného místa. Uvolni aspoň $MinMistoMB MB a spusť instalaci znovu."
+    }
+    try {
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri $adresa -OutFile $skript
+        } catch {
+            throw "Nepodařilo se stáhnout instalátor z $(([Uri]$adresa).Host). Zkontroluj připojení k internetu. ($($_.Exception.Message))"
+        }
+        # TLS 1.2 zapneme i pro oficiální instalátor. Obalový soubor s BOM snese každý znak v cestě.
+        $prikaz = "[Net.ServicePointManager]::SecurityProtocol = 'Tls12'; & '$($skript -replace "'", "''")'; exit `$LASTEXITCODE"
+        [IO.File]::WriteAllText($obal, $prikaz, (New-Object Text.UTF8Encoding($true)))
+        # Pracovní složka TEMP: oficiální instalátory si občas odkládají soubory do aktuální složky.
+        $p = Start-Process $PsExe -NoNewWindow -PassThru `
+            -WorkingDirectory $env:TEMP -RedirectStandardOutput $vystup -RedirectStandardError $chyby `
+            -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$obal`"")
+        $null = $p.Handle
+        Cekej $p $popis
+        if ($p.ExitCode -ne 0) {
+            foreach ($soubor in $vystup, $chyby) {
+                if (-not (Test-Path $soubor)) { continue }
+                Get-Content $soubor -Tail 6 | Where-Object { $_ -and ($_ -notmatch '^#< CLIXML|^<Objs') } |
+                    ForEach-Object { Write-Host "       $_" -ForegroundColor DarkGray }
+            }
+            throw "Oficiální instalace skončila chybou (kód $($p.ExitCode))."
+        }
+    } finally {
+        Remove-Item $skript, $obal, $vystup, $chyby -Force -ErrorAction SilentlyContinue
+    }
+}
 
 function Precti-Json($cesta) {
-    return ([IO.File]::ReadAllText($cesta) | ConvertFrom-Json)
+    # Prázdný soubor nebo jiný obsah než objekt bereme jako nečitelné nastavení.
+    $obsah = [IO.File]::ReadAllText($cesta) | ConvertFrom-Json
+    if ($obsah -isnot [Management.Automation.PSCustomObject]) { throw 'Soubor neobsahuje nastavení.' }
+    return $obsah
 }
 
 function Zapis-Text($cesta, $text) {
@@ -73,8 +193,8 @@ function Nastav($objekt, $nazev, $hodnota) {
 function Claude-Funguje {
     if (-not (Test-Path $ClaudeExe)) { return $false }
     try {
-        $null = & $ClaudeExe --version
-        return ($LASTEXITCODE -eq 0)
+        $verze = & $ClaudeExe --version
+        return (($LASTEXITCODE -eq 0) -and ("$verze" -match 'Claude Code'))
     } catch {
         return $false
     }
@@ -82,11 +202,13 @@ function Claude-Funguje {
 
 function Jina-Instalace-Funguje {
     # Oficiální instalátor odebere Claude nainstalovaný přes npm, to nesmíme nikomu udělat.
-    $prikaz = Get-Command claude -ErrorAction SilentlyContinue | Select-Object -First 1
+    # Zástupce aplikace ve složce WindowsApps není Claude Code a jeho spuštění by otevřelo okno.
+    $prikaz = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue |
+        Where-Object { $_.Source -notmatch '\\WindowsApps\\' } | Select-Object -First 1
     if (-not $prikaz) { return $false }
     try {
-        $null = & $prikaz.Source --version
-        return ($LASTEXITCODE -eq 0)
+        $verze = & $prikaz.Source --version
+        return (($LASTEXITCODE -eq 0) -and ("$verze" -match 'Claude Code'))
     } catch {
         return $false
     }
@@ -97,67 +219,46 @@ function Nainstaluj-Claude {
     if ($BezInstalace) { throw 'Claude Code není nainstalovaný a instalace je vypnutá.' }
     # Nefunkční soubor z dřívějška by mohl oficiální instalaci zmást.
     if (Test-Path -LiteralPath $ClaudeExe) { Remove-Item -LiteralPath $ClaudeExe -Force }
-    Write-Host '   Stahuji z oficiálního webu Anthropic, může to trvat pár minut...'
-    $skript = Join-Path $env:TEMP "claude-oficialni-$Razitko.ps1"
-    Invoke-WebRequest -UseBasicParsing -Uri $OficialniInstalator -OutFile $skript
-    try {
-        # TLS 1.2 zapneme i pro oficiální instalátor. Kódovaný příkaz snese každý znak v cestě.
-        $prikaz = "[Net.ServicePointManager]::SecurityProtocol = 'Tls12'; & '$($skript -replace "'", "''")'; exit `$LASTEXITCODE"
-        $kodovany = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($prikaz))
-        $p = Start-Process $PsExe -NoNewWindow -PassThru `
-            -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $kodovany)
-        $null = $p.Handle
-        $p.WaitForExit()
-        if ($p.ExitCode -ne 0) { throw "Oficiální instalace skončila chybou (kód $($p.ExitCode))." }
-    } finally {
-        Remove-Item $skript -Force -ErrorAction SilentlyContinue
-    }
+    Spust-Oficialni $OficialniInstalator 'claude' 'Stahuji Claude Code z oficiálního webu Anthropic'
     if (-not (Claude-Funguje)) { throw 'Instalace proběhla, ale Claude Code nejde spustit. Může ho blokovat antivirus.' }
     Hotovo 'Claude Code je nainstalovaný.'
 }
 
 function Codex-Funguje {
+    # Najde funkční Codex a zapamatuje si, kde je.
     $kandidati = @()
     if ($env:LOCALAPPDATA) { $kandidati += Join-Path $env:LOCALAPPDATA 'Programs\OpenAI\Codex\bin\codex.exe' }
-    $prikaz = Get-Command codex -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    $prikaz = Get-Command codex -CommandType Application -ErrorAction SilentlyContinue |
+        Where-Object { $_.Source -notmatch '\\WindowsApps\\' } | Select-Object -First 1
     if ($prikaz) { $kandidati += $prikaz.Source }
     foreach ($soubor in $kandidati) {
         if (-not (Test-Path -LiteralPath $soubor)) { continue }
         try {
-            $null = & $soubor --version
-            if ($LASTEXITCODE -eq 0) { return $true }
+            $verze = & $soubor --version
+            if (($LASTEXITCODE -eq 0) -and ("$verze" -match 'codex')) {
+                $script:CodexSoubor = $soubor
+                return $true
+            }
         } catch {}
     }
     return $false
 }
 
 function Nainstaluj-Codex {
-    # Codex je doplněk. Když se nepovede, instalace Claude pokračuje dál.
+    # Když se Codex nepovede, instalace Claude pokračuje dál.
     # Vrací $true, když Codex v počítači je.
     try {
         if (Codex-Funguje) { Hotovo 'Codex už v počítači je, instalaci přeskakuji.'; return $true }
         if ($BezInstalace) { return $false }
-        Write-Host '   Stahuji z oficiálního webu OpenAI, může to trvat pár minut...'
-        $skript = Join-Path $env:TEMP "codex-oficialni-$Razitko.ps1"
-        Invoke-WebRequest -UseBasicParsing -Uri $InstalatorCodexu -OutFile $skript
-        try {
-            # Bez tohoto se oficiální instalátor anglicky ptá a na konci by Codex sám spustil.
-            $env:CODEX_NON_INTERACTIVE = '1'
-            $prikaz = "[Net.ServicePointManager]::SecurityProtocol = 'Tls12'; & '$($skript -replace "'", "''")'; exit `$LASTEXITCODE"
-            $kodovany = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($prikaz))
-            $p = Start-Process $PsExe -NoNewWindow -PassThru `
-                -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $kodovany)
-            $null = $p.Handle
-            $p.WaitForExit()
-            if ($p.ExitCode -ne 0) { throw "kód $($p.ExitCode)" }
-        } finally {
-            Remove-Item $skript -Force -ErrorAction SilentlyContinue
-        }
-        if (-not (Codex-Funguje)) { throw 'Codex nejde spustit' }
+        # Bez tohoto se oficiální instalátor anglicky ptá a na konci by Codex sám spustil.
+        $env:CODEX_NON_INTERACTIVE = '1'
+        Spust-Oficialni $InstalatorCodexu 'codex' 'Stahuji Codex z oficiálního webu OpenAI'
+        if (-not (Codex-Funguje)) { throw 'Codex je stažený, ale nejde spustit. Může ho blokovat antivirus.' }
         Hotovo 'Codex je nainstalovaný.'
         return $true
     } catch {
-        Write-Host "   Codex se nepodařilo nainstalovat ($($_.Exception.Message)). Claude to neovlivní." -ForegroundColor Yellow
+        Pozor "Codex se nepodařilo nainstalovat. $($_.Exception.Message)"
+        Pozor 'Claude to neovlivní, instalace pokračuje.'
         return $false
     }
 }
@@ -191,7 +292,7 @@ function Nastav-Codex {
         Zapis-Text $cesta ((($nove + $zbytek) -join "`r`n") + "`r`n")
         Hotovo 'Codex se nebude na nic ptát.'
     } catch {
-        Write-Host '   Nastavení Codexu se nepodařilo zapsat, bude se ptát na potvrzení.' -ForegroundColor Yellow
+        Pozor 'Nastavení Codexu se nepodařilo zapsat, bude se ptát na potvrzení.'
     }
 }
 
@@ -224,7 +325,8 @@ function Pridej-DoPath {
         }
 
         if ($pridat.Count -gt 0) {
-            $novy = ($polozky + $pridat) -join ';'
+            # Na začátek, aby měl přednost před stejnojmennými zástupci jiných aplikací.
+            $novy = ($pridat + $polozky) -join ';'
             $klic.SetValue('Path', $novy, [Microsoft.Win32.RegistryValueKind]::ExpandString)
             # Tenhle zápis jen oznámí oknům Windows, že se proměnné změnily.
             [Environment]::SetEnvironmentVariable('CLAUDE_JEDEN_KLIK', $null, 'User')
@@ -244,11 +346,11 @@ function Nastav-Claude {
         try {
             $nastaveni = Precti-Json $cesta
         } catch {
-            Write-Host '   Staré nastavení nešlo přečíst, je uložené jako záloha a začínám znovu.' -ForegroundColor Yellow
+            Pozor 'Staré nastavení nešlo přečíst, je uložené jako záloha a začínám znovu.'
             $nastaveni = New-Object PSObject
         }
     }
-    if (-not $nastaveni.permissions) { Nastav $nastaveni 'permissions' (New-Object PSObject) }
+    if ($nastaveni.permissions -isnot [Management.Automation.PSCustomObject]) { Nastav $nastaveni 'permissions' (New-Object PSObject) }
     Nastav $nastaveni.permissions 'defaultMode' 'bypassPermissions'
     $zakazy = @(@($nastaveni.permissions.deny) + $Zakazy | Where-Object { $_ } | Select-Object -Unique)
     Nastav $nastaveni.permissions 'deny' $zakazy
@@ -275,7 +377,7 @@ function Priprav-Slozku {
         try {
             $konfigurace = Precti-Json $cesta
         } catch {
-            return
+            $konfigurace = New-Object PSObject
         }
         if ($konfigurace.oauthAccount) { return }
         Copy-Item $cesta "$cesta.zaloha-$Razitko"
@@ -283,16 +385,22 @@ function Priprav-Slozku {
     # Bez toho se Claude po startu anglicky ptá, jestli přepnout režim, a předvybrané je Ano.
     Nastav $konfigurace 'hasSeenAutoDefaultNudge' $true
     if (-not $konfigurace.theme) { Nastav $konfigurace 'theme' 'dark' }
-    if (-not $konfigurace.projects) { Nastav $konfigurace 'projects' (New-Object PSObject) }
+    if ($konfigurace.projects -isnot [Management.Automation.PSCustomObject]) { Nastav $konfigurace 'projects' (New-Object PSObject) }
     # Claude hledá důvěru i v nadřazených složkách. Zápis na kořeny disků znamená, že se
     # v žádné nové složce nezeptá. Jinak je předvybrané „No, exit“ a Enter ho vypne.
     # Všechna písmena, aby to platilo i pro flash disk nebo disk připojený později.
     $duveryhodne = @($Prace -replace '\\', '/')
     foreach ($pismeno in [char[]]'CDEFGHIJKLMNOPQRSTUVWXYZ') { $duveryhodne += "${pismeno}:/" }
     foreach ($klic in $duveryhodne) {
-        $projekt = New-Object PSObject
+        # Existující záznam projektu se jen doplní, Claude si v něm drží i jiné věci.
+        $projekt = $konfigurace.projects.PSObject.Properties[$klic]
+        if ($projekt -and ($projekt.Value -is [Management.Automation.PSCustomObject])) {
+            $projekt = $projekt.Value
+        } else {
+            $projekt = New-Object PSObject
+            Nastav $konfigurace.projects $klic $projekt
+        }
         Nastav $projekt 'hasTrustDialogAccepted' $true
-        Nastav $konfigurace.projects $klic $projekt
     }
     Zapis-Text $cesta ($konfigurace | ConvertTo-Json -Depth 50)
 }
@@ -318,87 +426,109 @@ function Pridej-Nabidku {
     Hotovo 'Po kliknutí pravým tlačítkem na složku jde otevřít příkazový řádek.'
 }
 
-function Vytvor-Zastupce {
+function Vytvor-Zastupce($nazev, $cil) {
     New-Item -ItemType Directory -Force -Path $Plocha | Out-Null
-    $lnk = Join-Path $Plocha 'Claude.lnk'
     $shell = New-Object -ComObject WScript.Shell
-    $zastupce = $shell.CreateShortcut($lnk)
-    $zastupce.TargetPath = $ClaudeExe
-    $zastupce.IconLocation = "$ClaudeExe,0"
+    $zastupce = $shell.CreateShortcut((Join-Path $Plocha "$nazev.lnk"))
+    $zastupce.TargetPath = $cil
+    if ($cil -like '*.exe') { $zastupce.IconLocation = "$cil,0" }
     $zastupce.WorkingDirectory = $Prace
-    $zastupce.Description = 'Spustit Claude'
+    $zastupce.Description = "Spustit $nazev"
     $zastupce.Save()
-    Hotovo 'Na ploše je ikona Claude.'
+    Hotovo "Na ploše je ikona $nazev."
 }
 
 try {
-    Write-Host ''
-    Write-Host '==================================' -ForegroundColor Cyan
-    Write-Host '   Claude a Codex na jeden klik' -ForegroundColor Cyan
-    Write-Host '==================================' -ForegroundColor Cyan
+    Uvod
 
-    if (-not [Environment]::Is64BitOperatingSystem) { throw 'Claude Code vyžaduje 64bitová Windows.' }
-    if ([Environment]::OSVersion.Version.Build -lt 17763) {
-        throw 'Tahle verze Windows je moc stará. Claude Code potřebuje Windows 10 verze 1809 nebo novější.'
-    }
-
-    if ((-not (Claude-Funguje)) -and (Jina-Instalace-Funguje)) {
+    # Dvě instalace naráz by si přepisovaly soubory.
+    $Zamek = New-Object Threading.Mutex($false, 'Local\ClaudeCodexJedenKlik')
+    $volno = $false
+    try { $volno = $Zamek.WaitOne(0) } catch [Threading.AbandonedMutexException] { $volno = $true }
+    if (-not $volno) {
         Write-Host ''
-        Write-Host 'Claude Code už v tomto počítači máš a funguje. Aby se nic nerozbilo, instalaci přeskakuji.' -ForegroundColor Green
-        Write-Host 'Stačí v příkazovém řádku napsat: claude'
-        Krok 'Instaluji Codex'
-        if (Nainstaluj-Codex) {
-            Nastav-Codex
-            Write-Host '   Codex spustíš v novém příkazovém řádku slovem: codex'
-        }
+        Pozor 'Instalace už běží v jiném okně. Tohle okno můžeš zavřít.'
         exit 0
     }
 
-    Krok '1/5  Instaluji Claude Code'
+    if (-not [Environment]::Is64BitOperatingSystem) { throw 'Claude Code i Codex vyžadují 64bitová Windows.' }
+    if ([Environment]::OSVersion.Version.Build -lt 17763) {
+        throw 'Tahle verze Windows je moc stará. Je potřeba Windows 10 verze 1809 nebo novější.'
+    }
+
+    if ((-not (Claude-Funguje)) -and (Jina-Instalace-Funguje)) {
+        # Claude nainstalovaný jinou cestou necháváme úplně být, doplní se jen Codex.
+        $KrokuCelkem = 2
+        Krok 1 'Claude Code'
+        Hotovo 'Claude Code už v počítači máš a funguje. Aby se nic nerozbilo, nechávám ho být.'
+        Krok 2 'Codex'
+        $JeCodex = Nainstaluj-Codex
+        if ($JeCodex) { Nastav-Codex }
+        Ramecek 'Green' @('HOTOVO')
+        Write-Host ''
+        Radek 'Claude   v příkazovém řádku napiš: claude'
+        if ($JeCodex) { Radek 'Codex    v novém příkazovém řádku napiš: codex' }
+        exit 0
+    }
+
+    Krok 1 'Claude Code'
     Nainstaluj-Claude
 
-    Krok '2/5  Instaluji Codex'
+    Krok 2 'Codex'
     $JeCodex = Nainstaluj-Codex
     if ($JeCodex) { Nastav-Codex }
     Pridej-DoPath
 
-    Krok '3/5  Nastavuji Claude'
+    Krok 3 'Nastavení pro začátečníka'
     Nastav-Claude
 
-    Krok '4/5  Připravuji pracovní složku'
+    Krok 4 'Pracovní složka'
     Priprav-Slozku
     Hotovo "Tvoje práce se bude ukládat do složky $Prace"
 
-    Krok '5/5  Přidávám ikonu a nabídku pravého tlačítka'
-    # Ikona ani nabídka nejsou pro Claude nezbytné, jejich selhání instalaci nezastaví.
-    try { Vytvor-Zastupce } catch {
-        Write-Host '   Ikonu na plochu se nepodařilo vytvořit. Claude spustíš slovem claude v příkazovém řádku.' -ForegroundColor Yellow
+    Krok 5 'Ikony a nabídka pravého tlačítka'
+    # Ikony ani nabídka nejsou nezbytné, jejich selhání instalaci nezastaví.
+    $IkonaClaude = $false
+    $IkonaCodex = $false
+    try { Vytvor-Zastupce 'Claude' $ClaudeExe; $IkonaClaude = $true } catch {
+        Pozor 'Ikonu Claude se nepodařilo vytvořit.'
+    }
+    if ($JeCodex) {
+        try { Vytvor-Zastupce 'Codex' $CodexSoubor; $IkonaCodex = $true } catch {
+            Pozor 'Ikonu Codex se nepodařilo vytvořit.'
+        }
     }
     try { Pridej-Nabidku } catch {
-        Write-Host '   Položku v nabídce pravého tlačítka se nepodařilo přidat.' -ForegroundColor Yellow
+        Pozor 'Položku v nabídce pravého tlačítka se nepodařilo přidat.'
     }
 
+    Ramecek 'Green' @('HOTOVO')
     Write-Host ''
-    Write-Host 'Hotovo!' -ForegroundColor Green
-    Write-Host 'Claude teď pracuje bez ptaní: co mu napíšeš, to rovnou udělá.'
-    Write-Host 'Příště ho spustíš ikonou Claude na ploše.'
-    Write-Host 'Nebo si založ složku, klikni na ni pravým tlačítkem, otevři příkazový řádek a napiš: claude'
+    $jak = 'v příkazovém řádku napiš:'
+    if ($IkonaClaude) { Radek "Claude   ikona na ploše, nebo $jak claude" } else { Radek "Claude   $jak claude" }
+    if ($IkonaCodex) { Radek "Codex    ikona na ploše, nebo $jak codex" } elseif ($JeCodex) { Radek "Codex    $jak codex" }
+    Radek "Složka   $Prace"
+    Write-Host ''
     if ($JeCodex) {
-        Write-Host 'Codex spustíš stejně, jen napíšeš: codex. Také pracuje bez ptaní.'
+        Radek 'Oba pracují bez ptaní: co jim napíšeš, to rovnou udělají.'
+        Radek 'Při prvním spuštění se zeptají na přihlášení. Přihlas se svým účtem.'
+    } else {
+        Radek 'Claude pracuje bez ptaní: co mu napíšeš, to rovnou udělá.'
+        Radek 'Při prvním spuštění se zeptá na přihlášení. Přihlas se svým účtem.'
     }
+    Radek 'Vlastní složka: klikni na ni pravým tlačítkem a otevři příkazový řádek.'
     Write-Host ''
-    Write-Host 'Při prvním spuštění se Claude i Codex zeptají na přihlášení. Přihlas se svým účtem.'
-    Write-Host ''
-    Write-Host 'Teď se otevře okno Claude. Přihlas se a pak piš obyčejně česky, co potřebuješ.' -ForegroundColor Yellow
+    Write-Host '     Teď se otevře okno Claude. Přihlas se a piš obyčejně česky, co potřebuješ.' -ForegroundColor Yellow
 
     if (-not $BezSpusteni) {
         Start-Process -FilePath $ClaudeExe -WorkingDirectory $Prace
     }
     exit 0
 } catch {
+    Ramecek 'Red' @('INSTALACE SE NEPOVEDLA')
     Write-Host ''
-    Write-Host 'Instalace se nepovedla.' -ForegroundColor Red
-    Write-Host $_.Exception.Message -ForegroundColor Red
-    Write-Host 'Vyfoť tuhle obrazovku a pošli ji tomu, kdo ti instalaci poslal.'
+    Write-Host "     $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host ''
+    Radek 'Vyfoť tuhle obrazovku a pošli ji tomu, kdo ti instalaci poslal.'
     exit 1
 }
