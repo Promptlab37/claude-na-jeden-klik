@@ -34,7 +34,7 @@ Pak už jen napiš obyčejně česky, co potřebuješ. Příště Claude spustí
 
 ## Dobré vědět
 
-**Claude se na nic neptá.** Je to tak nastavené záměrně (`bypassPermissions`), takže co mu napíšeš, to rovnou udělá, včetně práce se soubory a programy v počítači. Proto:
+**Claude ani Codex se na nic neptají.** Je to tak nastavené záměrně (u Claude `bypassPermissions`, u Codexu `approval_policy = "never"` bez sandboxu), takže co mu napíšeš, to rovnou udělá, včetně práce se soubory a programy v počítači. Proto:
 
 - Dej mu přesné zadání a důležité soubory si zálohuj.
 - Nepoužívej ho na firemním počítači ani na počítači s citlivými daty, pokud to nemáš povolené.
@@ -48,7 +48,7 @@ Chceš, aby se Claude ptal? V okně Claude stiskni `Shift+Tab`, nebo v souboru `
 | Krok | Co se změní |
 |---|---|
 | Instalace | Spustí [oficiální instalátor Anthropicu](https://claude.ai/install.ps1), pokud v `.local\bin` ještě funkční Claude není. Práva správce nepotřebuje. |
-| Codex | Spustí [oficiální instalátor OpenAI](https://chatgpt.com/codex/install.ps1), pokud Codex v počítači ještě není. Jeho nastavení nemění. Když se instalace Codexu nepovede, Claude se nainstaluje i tak. |
+| Codex | Spustí [oficiální instalátor OpenAI](https://chatgpt.com/codex/install.ps1), pokud Codex v počítači ještě není. V `.codex\config.toml` vypne potvrzování (`approval_policy = "never"`, `sandbox_mode = "danger-full-access"`), zbytek nastavení nechá a udělá zálohu. Když se instalace Codexu nepovede, Claude se nainstaluje i tak. |
 | PATH | Přidá `%USERPROFILE%\.local\bin` do proměnné PATH uživatele. Když v počítači v PATH chybí systémové složky Windows, doplní je tam také. |
 | Nastavení | Do `.claude\settings.json` zapíše režim bez ptaní, češtinu a pár zákazů (například formátování disku). Zbytek nastavení nechá a udělá zálohu. |
 | Pokyny | Vytvoří `.claude\CLAUDE.md` s pokyny pro práci se začátečníkem, pokud tam ještě žádné nejsou. |

@@ -162,6 +162,39 @@ function Nainstaluj-Codex {
     }
 }
 
+function Nastav-Codex {
+    # Codex se nebude ptát na potvrzení, stejně jako Claude. Ostatní nastavení zůstává.
+    try {
+        $slozka = Join-Path $Domov '.codex'
+        if ($env:CODEX_HOME) { $slozka = $env:CODEX_HOME }
+        New-Item -ItemType Directory -Force -Path $slozka | Out-Null
+        $cesta = Join-Path $slozka 'config.toml'
+        $radky = @()
+        if (Test-Path $cesta) {
+            Copy-Item $cesta "$cesta.zaloha-$Razitko"
+            $radky = @([IO.File]::ReadAllLines($cesta))
+        }
+        # Oba klíče musí být před první sekcí [...], jinak by patřily do ní.
+        $prvniSekce = $radky.Count
+        for ($i = 0; $i -lt $radky.Count; $i++) {
+            if ($radky[$i] -match '^\s*\[') { $prvniSekce = $i; break }
+        }
+        $hlava = @($radky | Select-Object -First $prvniSekce |
+            Where-Object { $_ -notmatch '^\s*(approval_policy|sandbox_mode)\s*=' })
+        $zbytek = @($radky | Select-Object -Skip $prvniSekce)
+        $nove = @('approval_policy = "never"', 'sandbox_mode = "danger-full-access"') + $hlava
+        # Pracovní složka je důvěryhodná, aby se na ni Codex při startu neptal.
+        $sekce = "[projects.'$Prace']"
+        if (($Prace -notmatch "'") -and ($zbytek -notcontains $sekce)) {
+            $zbytek += @('', $sekce, 'trust_level = "trusted"')
+        }
+        Zapis-Text $cesta ((($nove + $zbytek) -join "`r`n") + "`r`n")
+        Hotovo 'Codex se nebude na nic ptát.'
+    } catch {
+        Write-Host '   Nastavení Codexu se nepodařilo zapsat, bude se ptát na potvrzení.' -ForegroundColor Yellow
+    }
+}
+
 function Pridej-DoPath {
     if ($BezPath) { return }
     $klic = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($KlicPath)
@@ -314,7 +347,10 @@ try {
         Write-Host 'Claude Code už v tomto počítači máš a funguje. Aby se nic nerozbilo, instalaci přeskakuji.' -ForegroundColor Green
         Write-Host 'Stačí v příkazovém řádku napsat: claude'
         Krok 'Instaluji Codex'
-        if (Nainstaluj-Codex) { Write-Host '   Codex spustíš v novém příkazovém řádku slovem: codex' }
+        if (Nainstaluj-Codex) {
+            Nastav-Codex
+            Write-Host '   Codex spustíš v novém příkazovém řádku slovem: codex'
+        }
         exit 0
     }
 
@@ -323,6 +359,7 @@ try {
 
     Krok '2/5  Instaluji Codex'
     $JeCodex = Nainstaluj-Codex
+    if ($JeCodex) { Nastav-Codex }
     Pridej-DoPath
 
     Krok '3/5  Nastavuji Claude'
@@ -347,7 +384,7 @@ try {
     Write-Host 'Příště ho spustíš ikonou Claude na ploše.'
     Write-Host 'Nebo si založ složku, klikni na ni pravým tlačítkem, otevři příkazový řádek a napiš: claude'
     if ($JeCodex) {
-        Write-Host 'Codex spustíš stejně, jen napíšeš: codex'
+        Write-Host 'Codex spustíš stejně, jen napíšeš: codex. Také pracuje bez ptaní.'
     }
     Write-Host ''
     Write-Host 'Při prvním spuštění se Claude i Codex zeptají na přihlášení. Přihlas se svým účtem.'
